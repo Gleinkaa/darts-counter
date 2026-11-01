@@ -1,0 +1,65 @@
+{
+  "w": 640,
+  "h": 480,
+  "fps": 10,
+  "calibrationPx": [
+    {
+      "x": 325.145,
+      "y": 112.956
+    },
+    {
+      "x": 518.38,
+      "y": 188.073
+    },
+    {
+      "x": 350.892,
+      "y": 396.06
+    },
+    {
+      "x": 170.723,
+      "y": 259.021
+    }
+  ],
+  "darts": [
+    {
+      "label": "T20",
+      "points": 60
+    },
+    {
+      "label": "S5",
+      "points": 5
+    },
+    {
+      "label": "Bull",
+      "points": 50
+    }
+  ],
+  "turnTotal": 115,
+  "timeline": [
+    {
+      "fromS": 0,
+      "toS": 8,
+      "darts": 0
+    },
+    {
+      "fromS": 8,
+      "toS": 11,
+      "darts": 1
+    },
+    {
+      "fromS": 11,
+      "toS": 14,
+      "darts": 2
+    },
+    {
+      "fromS": 14,
+      "toS": 20,
+      "darts": 3
+    },
+    {
+      "fromS": 20,
+      "toS": 24,
+      "darts": 0
+    }
+  ]
+}
