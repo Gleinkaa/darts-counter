@@ -109,24 +109,24 @@ Measured on synthetic throws at the frame sizes the app actually processes (960�
 portrait, plus a 4:3 stream). Every throw includes simulated calibration taps (σ 2 px) with the snap,
 4:2:0 chroma subsampling, noise, lighting, shadows and overlapping darts. Seeds are held out from
 development. These numbers are for the detector given clean before/after frames; fed through the
-app's frame-stream tracker, a 120-throw probe scored 87.5 % (see "Detector only" in `docs/eval.md`).
+app's frame-stream tracker, a 120-throw probe scored 89.2 % (see "Detector only" in `docs/eval.md`).
 The full table and failure list are in [`docs/eval.md`](docs/eval.md):
 
 | set | throws | detected | score accuracy | 95 % CI | mean err mm | median | p90 | p95 | tip err < 3 mm |
 |---|---|---|---|---|---|---|---|---|---|
-| **landscape 960×540, oblique 25–55° (recommended)** | 480 | 99.2 % | **92.3 %** | 89.6–94.4 % | 1.59 | 0.60 | 2.82 | 4.47 | 90.2 % |
-| … overlapping an earlier dart | 85 | 97.6 % | **85.9 %** | 76.9–91.7 % | 4.04 | 0.92 | 6.47 | 22.89 | 80.0 % |
-| **portrait 540×960, oblique 25–55°** | 318 | 99.1 % | **91.5 %** | 87.9–94.1 % | 3.41 | 0.67 | 2.91 | 5.11 | 89.3 % |
-| … overlapping an earlier dart | 47 | 97.9 % | **85.1 %** | 72.3–92.6 % | 11.80 | 0.70 | 35.19 | 117.05 | 78.7 % |
-| **oblique, both orientations** | 798 | 99.1 % | **92.0 %** | 89.9–93.7 % | 2.32 | 0.62 | 2.88 | 4.50 | 89.8 % |
-| 4:3 640×480, oblique | 162 | 98.8 % | **90.7 %** | 85.3–94.3 % | 2.61 | 0.62 | 3.59 | 6.78 | 87.0 % |
-| landscape 960×540, near-front 0–20° (not recommended) | 162 | 99.4 % | **78.4 %** | 71.4–84.0 % | 9.20 | 0.96 | 33.29 | 42.29 | 63.0 % |
-| *ablation: landscape oblique, first 120 throws, taps only (no snap)* | 120 | 98.3 % | **90.0 %** | 83.3–94.2 % | 2.82 | 1.89 | 4.38 | 5.37 | 80.8 % |
-| *… the same throws with snap* | 120 | 98.3 % | **93.3 %** | 87.4–96.6 % | 1.72 | 0.63 | 3.07 | 4.59 | 86.7 % |
+| **landscape 960×540, oblique 25–55° (recommended)** | 480 | 99.2 % | **92.9 %** | 90.3–94.9 % | 1.52 | 0.60 | 2.61 | 4.25 | 91.5 % |
+| … overlapping an earlier dart | 85 | 97.6 % | **85.9 %** | 76.9–91.7 % | 3.97 | 0.92 | 7.76 | 22.89 | 82.4 % |
+| **portrait 540×960, oblique 25–55°** | 318 | 99.1 % | **91.5 %** | 87.9–94.1 % | 3.43 | 0.64 | 3.07 | 5.05 | 89.0 % |
+| … overlapping an earlier dart | 47 | 97.9 % | **83.0 %** | 69.9–91.1 % | 11.85 | 0.67 | 35.22 | 117.05 | 78.7 % |
+| **oblique, both orientations** | 798 | 99.1 % | **92.4 %** | 90.3–94.0 % | 2.28 | 0.61 | 2.71 | 4.41 | 90.5 % |
+| 4:3 640×480, oblique | 162 | 98.8 % | **91.4 %** | 86.0–94.8 % | 3.31 | 0.55 | 3.59 | 5.69 | 86.4 % |
+| landscape 960×540, near-front 0–20° (not recommended) | 162 | 99.4 % | **78.4 %** | 71.4–84.0 % | 9.13 | 1.06 | 33.25 | 42.40 | 65.4 % |
+| *ablation: landscape oblique, first 120 throws, taps only (no snap)* | 120 | 98.3 % | **88.3 %** | 81.4–92.9 % | 2.75 | 2.11 | 4.13 | 5.02 | 77.5 % |
+| *… the same throws with snap* | 120 | 98.3 % | **92.5 %** | 86.4–96.0 % | 1.67 | 0.65 | 3.03 | 4.25 | 88.3 % |
 
 **Against the targets (tip error < 3 mm, score accuracy ≥ 95 %), honestly:** the median tip error (about 0.6 mm) is well under 3 mm, and
-about 90 % of throws in the recommended setup land within 3 mm. Score accuracy is **92.3 % in landscape and
-91.5 % in portrait, so the ≥ 95 % target is not met.** The upper ends of the 95 % CIs are 94.4 % and 94.1 %. Earlier,
+about 90 % of throws in the recommended setup land within 3 mm. Score accuracy is **92.9 % in landscape and
+91.5 % in portrait, so the ≥ 95 % target is not met.** The upper ends of the 95 % CIs are 94.9 % and 94.1 %. Earlier,
 easier versions of this eval reported 96.7 %. Those used full-chroma 640×480 frames, one turn per scene,
 and seeds the detector had been tuned on.
 
@@ -135,12 +135,31 @@ and darts partly hidden behind an earlier dart's flight. Faint steel points over
 darts not found at all, account for the rest. [`docs/eval.md`](docs/eval.md) has the exact breakdown,
 computed by the eval itself.
 
-Snapping the calibration to the wires improves the same throws from 90 % to 93 %. A head-on camera is much
+Snapping the calibration to the wires improves the same throws from 88 % to 92.5 %. A head-on camera is much
 worse (78 %), and the app warns about it.
 
 These are **synthetic** numbers (`synth/render.ts`), not field results. The renderer shares the app's
 pinhole-camera assumptions and has no lens distortion, glare or worn board, so real boards will do
 worse. A labelled real-photo test set is the next step (see *Limitations*).
+
+### Accuracy ideas from the earlier plain-JS build, measured here
+
+The earlier plain-JS build had three extra accuracy ideas. Each was measured against this app's own
+eval and kept only where it helped:
+
+1. **Tip averaged over the resting frames** — kept (already in `src/tracker.ts`, `REST_FRAMES = 4`). At
+   the held-out eval's noise (σ 2–4.5) it is a wash: a paired 40-scene run flips 4 of 612 throws, the
+   median tip-error shift is 0.03 mm, and the bucket accuracies move within noise. Through the
+   frame-stream tracker it moves 105/120 → 107/120 (87.5 → 89.2 %). It is kept as a cheap
+   outlier-rejection step — neutral, not harmful, at the app's operating point — rather than as a
+   claimed accuracy win.
+2. **Board crop at native resolution** — dropped. The app already processes at 960 px on the long side
+   (twice the plain-JS app's 480 px), so a board-only crop gains only ~1.14 → 1.39 px/mm (22 %) instead
+   of the plain-JS app's ~2×. Measured score accuracy is unchanged (79.8 → 79.8/80.0 %, 4 vs 4 throws
+   flip), with only a smaller p90 tail (4.93 → 3.52 mm). Not worth the added pipeline complexity.
+3. **Five-tap homography** — dropped. This app snaps the calibration to ~60–200 measured wire points,
+   which re-fits the homography far more accurately than a fifth (bull) tap. A 5-tap calibration is
+   identical to 4-tap + snap (1 of 612 throws flips, median tip-error shift 0.011 mm).
 
 ## Development
 

@@ -292,7 +292,7 @@ worse. These are synthetic numbers, not field results.
 
 **Detector only.** This eval gives the detector clean before/after frame pairs. The app's frame-stream tracker
 (settling, "darts pulled", removals) is not exercised. A review probe that feeds the frames through the tracker
-(\`node synth/eval-tracker.ts\`: 20 held-out landscape scenes, 2 visits each, 120 throws) scored **87.5 %** (105/120, 95 % CI about 80–92 %),
+(\`node synth/eval-tracker.ts\`: 20 held-out landscape scenes, 2 visits each, 120 throws) scored **89.2 %** (107/120, 95 % CI about 82–94 %),
 with 2 throws producing no event and every pull recognised. Expect the app to score somewhat below the numbers
 here.
 
