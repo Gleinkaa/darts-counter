@@ -416,3 +416,20 @@ export function changedFraction(a: Img, b: Img, mask?: Uint8Array, thr = 40): nu
   }
   return n ? c / n : 0;
 }
+
+/**
+ * One tip from the same resting dart detected in several frames (fresh sensor noise in each): the
+ * tips within `tolPx` of the component-wise median, averaged. A frame that read the dart's other
+ * end, or caught it still settling, drops out as an outlier. Null when no tip agrees with the median.
+ */
+export function restingTip(tips: Pt[], tolPx = 3): Pt | null {
+  const median = (v: number[]) => {
+    const s = [...v].sort((a, b) => a - b), m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
+  if (!tips.length) return null;
+  const mx = median(tips.map((p) => p.x)), my = median(tips.map((p) => p.y));
+  const near = tips.filter((p) => Math.hypot(p.x - mx, p.y - my) <= tolPx);
+  if (!near.length) return null;
+  return { x: near.reduce((s, p) => s + p.x, 0) / near.length, y: near.reduce((s, p) => s + p.y, 0) / near.length };
+}

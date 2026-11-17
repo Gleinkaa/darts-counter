@@ -21,7 +21,8 @@ for (let s = 0; s < SCENES; s++) {
   const tr = new ThrowTracker(H, sc.cam.w, sc.cam.h);
   tr.reset(empty);
   let t = 0, fseed = seed * 17;
-  const hold = (st: Dart[]) => { const ev: TrackerEvent[] = []; const ex = 1 + R.normal() * 0.01; for (let i = 0; i < 6; i++) ev.push(...tr.feed(renderFrame(sc, st, fseed++, ex), (t += 100))); return ev.filter((e) => e.type !== 'busy'); };
+  // Darts are held 6 frames (0.6 s); the empty board after a pull 10 frames, past the 0.7 s pull hold.
+  const hold = (st: Dart[], n = st.length ? 6 : 10) => { const ev: TrackerEvent[] = []; const ex = 1 + R.normal() * 0.01; for (let i = 0; i < n; i++) ev.push(...tr.feed(renderFrame(sc, st, fseed++, ex), (t += 100))); return ev.filter((e) => e.type !== 'busy'); };
   for (let turn = 0; turn < 2; turn++) {
     const darts: Dart[] = [];
     const line: string[] = [];

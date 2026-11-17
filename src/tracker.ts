@@ -2,17 +2,26 @@
 //
 // It keeps the last *settled* frame. When the picture changes and then holds still for
 // `settleMs`, the new settled frame is compared with the old one:
-//   - close to the empty-board reference  -> "empty" (darts were pulled: the visit ends)
-//   - otherwise detectDart(old, new)       -> "dart"
-//   - a big change with no dart            -> "nodart" (someone walked past, light changed…)
+//   - back to the empty-board reference   -> "empty" once the board has stayed so for `emptyHoldMs`
+//                                            (the darts were pulled: the visit ends)
+//   - otherwise detectDart(old, new)        -> "dart", or "removed" when a dart came out
+//   - a change with no dart                 -> "nodart"
+//   - most of the board different and still -> "blocked": the old settled frame is kept until the
+//     view clears ("unblocked"). Still blocked after `checkMs` (a light switched on or off, the camera
+//     was knocked) -> "check": no events at all until the board is confirmed empty (reset).
+// A dart's tip is read in each of the last REST_FRAMES still frames and combined (restingTip), so
+// one noisy frame does not decide the score.
 // Motion is measured on a 4x-downsampled grey image, so the per-frame cost is small; the full
-// detector runs only once per settle.
+// detector runs only at a settle.
 
 import { type Pt } from './board.ts';
-import { type Detection, detectDart } from './detect.ts';
+import { type Detection, detectDart, restingTip } from './detect.ts';
 import { apply, invert, type Mat3 } from './homography.ts';
 import { type Img } from './img.ts';
 import { boardMask } from './mask.ts';
+
+/** Still frames whose tips are combined into one (see docs/eval.md: "tip over resting frames"). */
+export const REST_FRAMES = 4;
 
 export type TrackerEvent =
   | { type: 'dart'; det: Detection; board: Pt }
@@ -20,7 +29,12 @@ export type TrackerEvent =
   /** A dart was pulled out or fell out mid-visit; never scored. */
   | { type: 'removed'; board: Pt }
   | { type: 'nodart'; changed: number }
-  | { type: 'busy'; changed: number };
+  | { type: 'busy'; changed: number }
+  /** Most of the board looks different and holds still: a hand resting on it, a light switched. */
+  | { type: 'blocked'; changed: number }
+  | { type: 'unblocked' }
+  /** Blocked for `checkMs`: the empty-board reference is no longer valid. Silent until reset. */
+  | { type: 'check'; changed: number };
 
 export interface TrackerOpts {
   settleMs?: number;
@@ -28,7 +42,14 @@ export interface TrackerOpts {
   minChange?: number;
   /** Below this fraction of change against the empty reference the board counts as empty. */
   emptyMax?: number;
+  /** The board must look empty and still this long, from the first still frame, before "empty". */
+  emptyHoldMs?: number;
+  /** A settled view that stays blocked this long asks for a board check. */
+  checkMs?: number;
 }
+
+/** A change bigger than this fraction of the board is a hand or body, never a dart. */
+const BIG_CHANGE = 0.08;
 
 const SCALE = 4;
 
@@ -63,6 +84,8 @@ export class ThrowTracker {
   private settleMs: number;
   private minChange: number;
   private emptyMax: number;
+  private emptyHoldMs: number;
+  private checkMs: number;
   private stable: Img | null = null;
   private stableSmall: Small | null = null;
   private empty: Small | null = null;
@@ -70,7 +93,18 @@ export class ThrowTracker {
   private awaitStill = -1;
   private last: Small | null = null;
   private stillSince = -1;
+  /** The last REST_FRAMES still frames since stillSince (the newest last). */
+  private rest: Img[] = [];
+  /** The first still frame, to notice a change too small or slow for the motion gate. */
+  private restStart: Small | null = null;
   private pending = false;
+  /** stillSince of a settle that found the board empty; "empty" fires after emptyHoldMs. */
+  private emptySince = -1;
+  private blocked = false;
+  /** Start of the current still, blocked stretch; any motion restarts it. */
+  private blockedSince = -1;
+  /** Waiting for the user to confirm an empty board: no events. */
+  checking = false;
   busy = false;
 
   constructor(H: Mat3, w: number, h: number, opts: TrackerOpts = {}) {
@@ -84,6 +118,8 @@ export class ThrowTracker {
     this.settleMs = opts.settleMs ?? 350;
     this.minChange = opts.minChange ?? 0.0015;
     this.emptyMax = opts.emptyMax ?? 0.002;
+    this.emptyHoldMs = opts.emptyHoldMs ?? 700;
+    this.checkMs = opts.checkMs ?? 5000;
   }
 
   /**
@@ -93,6 +129,7 @@ export class ThrowTracker {
   resetWhenStill(): void {
     this.stable = null;
     this.awaitStill = 0;
+    this.checking = false;
   }
 
   /** Use this frame as the empty board. Only call it when the user has confirmed the board is empty. */
@@ -102,8 +139,8 @@ export class ThrowTracker {
     this.empty = this.stableSmall;
     this.emptyFull = frame;
     this.last = this.stableSmall;
-    this.pending = false;
-    this.stillSince = -1;
+    this.clearMotion();
+    this.checking = false;
   }
 
   /** Take this frame as the current state of the board (darts may be in it); keeps the empty reference. */
@@ -112,8 +149,17 @@ export class ThrowTracker {
     this.stable = frame;
     this.stableSmall = shrink(frame);
     this.last = this.stableSmall;
+    this.clearMotion();
+  }
+
+  private clearMotion(): void {
     this.pending = false;
     this.stillSince = -1;
+    this.rest = [];
+    this.emptySince = -1;
+    this.blocked = false;
+    this.blockedSince = -1;
+    this.busy = false;
   }
 
   /** Fraction of board pixels that differ between two small frames (exposure-compensated). */
@@ -133,6 +179,7 @@ export class ThrowTracker {
   }
 
   feed(frame: Img, tMs: number): TrackerEvent[] {
+    if (this.checking) return [];
     if (!this.stable) {
       const s0 = shrink(frame);
       if (this.awaitStill >= 0) {
@@ -151,45 +198,97 @@ export class ThrowTracker {
     this.last = s;
     if (moving) {
       this.stillSince = -1;
+      this.rest = [];
+      // A hand back in the board before the hold is over: the pull is judged again once it is still.
+      this.emptySince = -1;
+      this.blockedSince = -1;
       this.pending = true;
       const ch = this.changed(this.stableSmall!, s);
-      if (ch > 0.08 && !this.busy) {
+      if (ch > BIG_CHANGE && !this.busy) {
         this.busy = true;
         events.push({ type: 'busy', changed: ch });
       }
       return events;
     }
-    if (this.stillSince < 0) this.stillSince = tMs;
+    // The resting frames must all show one unchanged scene: a far, thin dart can land without
+    // tripping the motion gate, and the frames before it would read no tip at all.
+    const crept = this.stillSince >= 0 && this.changed(this.restStart!, s) > this.minChange / 4;
+    if (this.stillSince < 0 || crept) {
+      this.stillSince = tMs;
+      this.rest = [];
+      this.restStart = s;
+    }
+    if (crept) {
+      this.pending = true;
+      this.emptySince = -1;
+    }
+    this.rest.push(frame);
+    if (this.rest.length > REST_FRAMES) this.rest.shift();
+    if (this.emptySince >= 0) {
+      // The board looked empty at the settle. Only once it has stayed empty and still for
+      // emptyHoldMs is it "empty": a hand still reaching in, or a dart only covered for a moment,
+      // moves first. This frame becomes the new reference (follows slow lighting drift).
+      if (tMs - this.emptySince < this.emptyHoldMs) return events;
+      this.reset(frame);
+      events.push({ type: 'empty' });
+      return events;
+    }
     const vsStable = this.changed(this.stableSmall!, s);
     if (!this.pending && vsStable <= this.minChange) return events;
     if (tMs - this.stillSince < this.settleMs) return events;
 
     // Settled after a change.
-    this.pending = false;
     this.busy = false;
-    const before = this.stable;
+    if (vsStable > BIG_CHANGE) {
+      // Not a dart (and not the empty board: a board with darts never differs this much from it).
+      // Keep the last good frame: when the view clears, what changed meanwhile is judged against
+      // it, as if nothing had been in the way.
+      if (!this.blocked) events.push({ type: 'blocked', changed: vsStable });
+      this.blocked = true;
+      if (this.blockedSince < 0) this.blockedSince = this.stillSince;
+      // A hand or a body is never this still for long; a light or exposure jump, or a knocked
+      // camera, is. The empty-board reference is useless then: only the user can say the board is empty.
+      if (tMs - this.blockedSince >= this.checkMs) {
+        this.checking = true;
+        events.push({ type: 'check', changed: vsStable });
+      }
+      return events;
+    }
+    if (this.blocked) {
+      this.blocked = false;
+      this.blockedSince = -1;
+      events.push({ type: 'unblocked' });
+    }
     const eNow = this.changed(this.empty!, s);
     const eBefore = this.changed(this.empty!, this.stableSmall!);
-    this.stable = frame;
-    this.stableSmall = s;
     // "Empty" is relative: the board must have gone back to the empty reference. An absolute
     // threshold alone would swallow a small, far-away first dart. The thresholds alone also pass
     // when the darts are pulled in two goes and one small far dart is still in: so the detector
-    // must find nothing against the empty board either.
+    // must find nothing against the empty board either. The settled frame is not taken yet, so a
+    // hand coming back during the hold is judged against the board with the darts in.
     if (eNow <= this.emptyMax && eNow < 0.35 * eBefore && !detectDart(this.emptyFull!, frame, { mask: this.mask, H: this.H })) {
-      // Follow slow lighting drift: the board is verified empty, so it is safe as the new reference.
-      this.empty = s;
-      this.emptyFull = frame;
-      events.push({ type: 'empty' });
+      this.emptySince = this.stillSince;
       return events;
     }
+    this.pending = false;
+    const before = this.stable;
+    this.stable = frame;
+    this.stableSmall = s;
     const det = detectDart(before, frame, { mask: this.mask, H: this.H });
-    if (det && vsStable < 0.08) {
+    if (det) {
       // Differencing is symmetric: a dart pulled out (or falling out) looks like a new one.
       // Along the detected dart, a removal makes the picture look *more* like the empty board.
       // A removal also shrinks the area that differs from the empty board; an addition never does.
       if (eNow < eBefore && this.removal(before, frame, det)) events.push({ type: 'removed', board: apply(this.Hi, det.tip) });
-      else events.push({ type: 'dart', det, board: apply(this.Hi, det.tip) });
+      else {
+        const tips = [det.tip];
+        for (const f of this.rest.slice(0, -1)) {
+          const d = detectDart(before, f, { mask: this.mask, H: this.H });
+          if (d) tips.push(d.tip);
+        }
+        const tip = restingTip(tips) ?? det.tip;
+        events.push({ type: 'dart', det: { ...det, tip }, board: apply(this.Hi, tip) });
+      }
     } else if (vsStable > this.minChange) events.push({ type: 'nodart', changed: vsStable });
     return events;
   }

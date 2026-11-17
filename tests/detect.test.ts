@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { polar, scoreAt, scoreLabel } from '../src/board.ts';
-import { detectDart } from '../src/detect.ts';
+import { detectDart, restingTip } from '../src/detect.ts';
 import { apply, invert } from '../src/homography.ts';
 import { boardMask } from '../src/mask.ts';
 import { makeScene, randomDart, renderFrame, rng } from '../synth/render.ts';
@@ -39,5 +39,17 @@ describe('detectDart', () => {
     expect(det).not.toBeNull();
     const b = apply(Hi, det!.tip);
     expect(Math.hypot(b.x - dart.tip.x, b.y - dart.tip.y)).toBeLessThan(3);
+  });
+});
+
+describe('restingTip', () => {
+  it('averages the frames that agree and drops a frame that read the wrong end', () => {
+    const tip = restingTip([{ x: 100, y: 50 }, { x: 101, y: 50 }, { x: 160, y: 20 }, { x: 100.5, y: 51 }]);
+    expect(tip!.x).toBeCloseTo(100.5, 6);
+    expect(tip!.y).toBeCloseTo(50.333, 2);
+  });
+
+  it('two frames that disagree give no combined tip', () => {
+    expect(restingTip([{ x: 100, y: 50 }, { x: 160, y: 20 }])).toBeNull();
   });
 });

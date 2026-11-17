@@ -1,5 +1,5 @@
 // Detection eval on synthetic throws. Writes docs/eval.md.
-//   node synth/eval.ts [--scenes 80] [--quick]
+//   node synth/eval.ts [--scenes 80] [--turns 2] [--rest N] [--bulltap] [--rows out.json] [--no-write]
 // Each scene: random camera/lighting, a simulated user calibration (true wire points + tap
 // noise), then turns of 3 darts. Every throw is scored from the detected tip through the
 // fitted homography and compared with the ground truth.
@@ -7,11 +7,12 @@
 import { writeFileSync } from 'node:fs';
 import { CALIBRATION_POINTS, scoreAt, scoreLabel, type Pt } from '../src/board.ts';
 import { apply, fitHomography, invert } from '../src/homography.ts';
-import { detectDart } from '../src/detect.ts';
+import { detectDart, restingTip } from '../src/detect.ts';
 import { boardMask } from '../src/mask.ts';
 import { refineCalibration } from '../src/refine.ts';
 import { writePPM } from './ppm.ts';
 import type { Img } from '../src/img.ts';
+import { REST_FRAMES } from '../src/tracker.ts';
 import { type Dart, makeScene, project, randomDart, randomTip, renderFrame as renderRGB, rng } from './render.ts';
 import { frameToI420, i420ToFrame } from './y4m.ts';
 
@@ -39,6 +40,13 @@ const argStr = (k: string) => {
 const DUMP = new Set((argStr('--dump') ?? '').split(',').filter(Boolean));
 const DUMP_DIR = DUMP.size ? args[args.indexOf('--dump') + 2] : undefined;
 const ONLY = argStr('--only');
+// The tracker reads the tip in each of the last REST_FRAMES still frames and combines them
+// (restingTip). --rest 1 gives the single-frame detector, as before that was added.
+const REST = argNum('--rest', REST_FRAMES);
+// Ablation: a fifth calibration tap on the bull centre (the plain-JS app's calibration).
+const BULL_TAP = args.includes('--bulltap');
+// Per-throw results as JSON, for paired before/after comparisons.
+const ROWS_OUT = argStr('--rows');
 
 interface Row {
   bucket: string;
@@ -100,7 +108,12 @@ function runBucket(bucket: string, tilt: [number, number], scenes: number, seed0
       const q = apply(sc.H, p);
       return { x: q.x + R.normal() * TAP_NOISE_PX, y: q.y + R.normal() * TAP_NOISE_PX };
     });
-    const Htaps = fitHomography(CALIBRATION_POINTS, taps);
+    // --bulltap: a fifth tap on the bull centre. Its own RNG, so the throws stay the same.
+    const Rb = rng(seed + 9);
+    const bull = apply(sc.H, { x: 0, y: 0 });
+    const Htaps = BULL_TAP
+      ? fitHomography([...CALIBRATION_POINTS, { x: 0, y: 0 }], [...taps, { x: bull.x + Rb.normal() * TAP_NOISE_PX, y: bull.y + Rb.normal() * TAP_NOISE_PX }])
+      : fitHomography(CALIBRATION_POINTS, taps);
     const empty = renderFrame(sc, [], seed * 13, 1);
     const H = snap ? refineCalibration(empty, Htaps, CALIBRATION_POINTS).H : Htaps;
     const Hi = invert(H);
@@ -125,9 +138,19 @@ function runBucket(bucket: string, tilt: [number, number], scenes: number, seed0
         });
         darts.push(d);
         const exposure = 1 + R.normal() * 0.02;
-        const next = renderFrame(sc, darts, seed * 13 + turn * 7 + k + 1, exposure);
+        const fseed = seed * 13 + turn * 7 + k + 1;
+        const next = renderFrame(sc, darts, fseed, exposure);
         const dbg: { reason?: string; bin?: Uint8Array; walk?: string; cands?: string[] } = {};
-        const det = detectDart(prev, next, { mask, H, debug: dbg });
+        let det = detectDart(prev, next, { mask, H, debug: dbg });
+        if (det && REST > 1) {
+          // As the tracker does: the same resting dart in REST frames (fresh sensor noise), tips combined.
+          const tips = [det.tip];
+          for (let i = 1; i < REST; i++) {
+            const o = detectDart(prev, renderFrame(sc, darts, fseed + i * 100_003, exposure), { mask, H });
+            if (o) tips.push(o.tip);
+          }
+          det = { ...det, tip: restingTip(tips) ?? det.tip };
+        }
         const truth = scoreAt(d.tip.x, d.tip.y);
         if (DUMP.has(`${s}:${turn}:${k}`) && DUMP_DIR) dumpThrow(DUMP_DIR, `${s}-${turn}-${k} ${bucket}`, prev, next, dbg.bin, det?.tip, apply(sc.H, d.tip), d, (dbg.cands ?? []).filter((c) => !/score=[0-9]\./.test(c)).join('\n  '));
         let got = scoreAt(1e6, 0);
@@ -322,3 +345,4 @@ if (args.includes('--bias')) {
 }
 if (args.includes('--fails')) for (const r of all.filter((x) => !x.ok)) console.log(r.bucket, r.scene, r.dart, r.truth, r.got, f(r.errMm), r.reason ?? '');
 if (write) writeFileSync(new URL('../docs/eval.md', import.meta.url), md);
+if (ROWS_OUT) writeFileSync(ROWS_OUT, JSON.stringify(all.concat(noSnap).map((r) => ({ b: r.bucket, s: r.scene, d: r.dart, ok: r.ok, e: r.errMm }))));

@@ -15,6 +15,18 @@ function withHand(im: Img): Img {
   return out;
 }
 
+/** A lamp switched on at one side: the right half much brighter, the left a little. Not a global gain. */
+function relit(im: Img): Img {
+  const out = cloneImg(im);
+  for (let y = 0; y < im.height; y++)
+    for (let x = 0; x < im.width; x++) {
+      const k = x > im.width / 2 ? 1.6 : 1.1;
+      const i = (y * im.width + x) * 4;
+      for (let c = 0; c < 3; c++) out.data[i + c] = im.data[i + c] * k + 12;
+    }
+  return out;
+}
+
 describe('ThrowTracker', () => {
   const sc = makeScene(4242, { tilt: [38, 42] });
   const R = rng(77);
@@ -34,7 +46,7 @@ describe('ThrowTracker', () => {
     hold(darts.slice(0, 3), 6);
     const withAll = frames[frames.length - 1];
     for (let i = 0; i < 3; i++) frames.push(withHand(withAll));
-    hold([], 6);
+    hold([], 10); // still and empty for 0.7 s before "empty"
 
     const events: TrackerEvent[] = [];
     frames.forEach((f, i) => events.push(...tr.feed(f, i * 100)));
@@ -63,11 +75,12 @@ describe('ThrowTracker', () => {
     expect(ev.map((e) => e.type)).toEqual(['dart']);
   });
 
+  /** Each state is held `perState` frames at 10 fps; an empty board 10, for the 0.7 s pull hold. */
   const run = (tr: ThrowTracker, states: Dart[][], perState = 6, seed0 = 500) => {
     const events: TrackerEvent[] = [];
     let t = 0, seed = seed0;
     for (const st of states)
-      for (let i = 0; i < perState; i++) events.push(...tr.feed(renderFrame(sc, st, seed++), (t += 100)));
+      for (let i = 0; i < (st.length ? perState : 10); i++) events.push(...tr.feed(renderFrame(sc, st, seed++), (t += 100)));
     return events.filter((e) => e.type !== 'busy');
   };
 
@@ -111,7 +124,7 @@ describe('ThrowTracker', () => {
     const ev: TrackerEvent[] = [];
     let seed = 3100;
     for (const st of [[darts[0]], []])
-      for (let i = 0; i < 6; i++) ev.push(...tr.feed(renderFrame(sc, st, seed++), (t += 100)));
+      for (let i = 0; i < (st.length ? 6 : 10); i++) ev.push(...tr.feed(renderFrame(sc, st, seed++), (t += 100)));
     expect(ev.filter((e) => e.type !== 'busy').map((e) => e.type)).toEqual(['dart', 'empty']);
   });
 
@@ -147,5 +160,59 @@ describe('ThrowTracker', () => {
       expect(pulls, `D${s}`).not.toContain('dart');
       expect(pulls.at(-1), `D${s}`).toBe('empty');
     }
+  });
+
+  describe('blocked view and board check', () => {
+    /** Feed frames at 10 fps from t; returns the events (no "busy") and the end time. */
+    const play = (tr: ThrowTracker, frames: Img[], t: number) => {
+      const ev: TrackerEvent[] = [];
+      for (const f of frames) ev.push(...tr.feed(f, (t += 100)));
+      return { types: ev.filter((e) => e.type !== 'busy').map((e) => e.type), ev, t };
+    };
+    const frames = (n: number, ds: Dart[], seed: number, fx: (im: Img) => Img = (im) => im) =>
+      Array.from({ length: n }, (_, i) => fx(renderFrame(sc, ds, seed + i)));
+
+    it('a light switched on with a dart in: blocked, then a board check, never a phantom dart', () => {
+      const tr = new ThrowTracker(sc.H, sc.cam.w, sc.cam.h);
+      tr.reset(renderFrame(sc, [], 6000));
+      let r = play(tr, frames(6, [darts[0]], 6001), 0);
+      expect(r.types).toEqual(['dart']);
+      r = play(tr, frames(60, [darts[0]], 6100, relit), r.t);
+      expect(r.types).toEqual(['blocked', 'check']);
+      expect(tr.checking).toBe(true);
+      // Pulled under the new light while the check is open: nothing at all.
+      r = play(tr, frames(20, [], 6200, relit), r.t);
+      expect(r.types).toEqual([]);
+      // "Board is empty": the board is learned again and the next dart scores right.
+      tr.resetWhenStill();
+      r = play(tr, frames(4, [], 6300, relit), r.t);
+      r = play(tr, [...frames(6, [darts[1]], 6400, relit), ...frames(10, [], 6500, relit)], r.t);
+      expect(r.types).toEqual(['dart', 'empty']);
+      const d = r.ev.find((e) => e.type === 'dart')!;
+      expect(d.type === 'dart' && scoreLabel(scoreAt(d.board.x, d.board.y))).toBe('5');
+    });
+
+    it('an exposure jump (global gain) needs no check: the pull still ends the visit', () => {
+      const tr = new ThrowTracker(sc.H, sc.cam.w, sc.cam.h);
+      tr.reset(renderFrame(sc, [], 6600));
+      let r = play(tr, frames(6, [darts[0]], 6601), 0);
+      expect(r.types).toEqual(['dart']);
+      const brighter = (n: number, ds: Dart[], seed: number) => Array.from({ length: n }, (_, i) => renderFrame(sc, ds, seed + i, 1.25));
+      r = play(tr, [...brighter(20, [darts[0]], 6700), ...brighter(10, [], 6800)], r.t);
+      expect(r.types).toEqual(['empty']);
+    });
+
+    it('a hand resting on the board is waited out: no dart, no check, and the pull still counts', () => {
+      const tr = new ThrowTracker(sc.H, sc.cam.w, sc.cam.h);
+      tr.reset(renderFrame(sc, [], 7000));
+      let r = play(tr, [...frames(6, [darts[0]], 7001), ...frames(6, darts.slice(0, 2), 7010)], 0);
+      expect(r.types).toEqual(['dart', 'dart']);
+      r = play(tr, frames(20, darts.slice(0, 2), 7100, withHand), r.t); // 2 s, still
+      expect(r.types).toEqual(['blocked']);
+      r = play(tr, frames(6, [darts[1]], 7200), r.t); // the hand leaves, having pulled one dart
+      expect(r.types).toEqual(['unblocked', 'removed']);
+      r = play(tr, frames(10, [], 7300), r.t);
+      expect(r.types).toEqual(['empty']);
+    });
   });
 });
