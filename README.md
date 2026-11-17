@@ -153,10 +153,11 @@ eval and kept only where it helped:
    frame-stream tracker it moves 105/120 → 107/120 (87.5 → 89.2 %). It is kept as a cheap
    outlier-rejection step — neutral, not harmful, at the app's operating point — rather than as a
    claimed accuracy win.
-2. **Board crop at native resolution** — dropped. The app already processes at 960 px on the long side
+2. **Board crop at native resolution** — dropped. Measured with `node synth/crop-exp.ts` (whole frame vs a
+   native-resolution board crop vs crop + re-snap). The app already processes at 960 px on the long side
    (twice the plain-JS app's 480 px), so a board-only crop gains only ~1.14 → 1.39 px/mm (22 %) instead
-   of the plain-JS app's ~2×. Measured score accuracy is unchanged (79.8 → 79.8/80.0 %, 4 vs 4 throws
-   flip), with only a smaller p90 tail (4.93 → 3.52 mm). Not worth the added pipeline complexity.
+   of the plain-JS app's ~2×. Score accuracy is unchanged (79.8 → 79.8/80.0 %, 4 vs 4 throws flip), with
+   only a smaller p90 tail (4.93 → 3.52 mm). Not worth the added pipeline complexity.
 3. **Five-tap homography** — dropped. This app snaps the calibration to ~60–200 measured wire points,
    which re-fits the homography far more accurately than a fifth (bull) tap. A 5-tap calibration is
    identical to 4-tap + snap (1 of 612 throws flips, median tip-error shift 0.011 mm).
