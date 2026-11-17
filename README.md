@@ -52,12 +52,27 @@ Both servers accept `*.ts.net` host names (`vite.config.ts`).
    silently. A camera almost straight in front of the board gets a warning. Calibrations are remembered
    separately for portrait and landscape, but every rotation comes back to this screen to confirm.
 4. **Throw.** Each dart is scored about ⅓ s after it lands and marked on the picture. Three darts make
-   a visit. **Pull the darts:** when the board is empty again the visit ends automatically (or tap
-   **Darts pulled ▸**). A dart that is pulled out or falls out mid-visit is recognised as a removal
-   and is not counted.
-5. **Fix a dart:** tap it in the visit bar or in **History**, then tap the right segment on the board
+   a visit; a bust or a checkout ends it early. Darts thrown into a finished visit are not counted.
+5. **Pull the darts.** When every dart is out and the board has stayed empty for about 0.7 s, the visit
+   ends and the next player is up (*Darts pulled — Player 2 to throw*). Pulling after one or two darts
+   ends the visit early. A dart that is pulled out or falls out mid-visit is recognised as a removal and
+   is not counted. **Darts pulled ▸** ends a visit by hand, for darts the camera never saw.
+   The pull only ends the visit its darts were scored in: if that visit was already ended with
+   **Darts pulled ▸** while the darts were still in, pulling them later does not end the next
+   player's visit. **Undo** right after a hand-over gives the board back to the previous player.
+6. **Fix a dart:** tap it in the visit bar or in **History**, then tap the right segment on the board
    picture (or *Miss / 25 / Bull*, or *Tap position on camera*). **＋ Dart** enters a dart by hand,
    for example one that bounced out. **Undo** steps back one action at a time, including a visit change.
+
+**Board check.** The camera compares every throw with the empty board it learned when you tapped
+*Board empty — start*. A hand resting on the board is waited out: the status shows *View blocked*
+and nothing is scored until it is gone. But if most of the board still looks different after about
+5 s (a light switched on or off, the camera knocked), that empty board is no longer valid, and scoring
+against it would invent darts. The camera then stops scoring and asks you to pull all darts out and tap
+**Board is empty**; a finished visit is then handed over, an open one goes on. A plain exposure change
+(the whole picture brighter or darker) is compensated and needs no check. Recalibrating or rotating the
+phone with darts in the board asks for the same thing on the calibration screen (*Darts are out — start*).
+A game is not restored after the page is reloaded, so a reload always starts at that confirmation too.
 
 If camera access is denied, the app explains how to allow it and offers **Score by tapping instead**:
 the same game with the board picker only.
@@ -70,7 +85,8 @@ the same game with the board picker only.
 | 4-point homography (Hartley-normalised DLT), inverse | `src/homography.ts` |
 | camera pose from the homography (focal length + board normal) | `src/camera.ts` |
 | dart detection by frame differencing | `src/detect.ts` |
-| frame stream → "dart" / "darts pulled" events | `src/tracker.ts` |
+| frame stream → "dart" / "darts pulled" / "blocked" events | `src/tracker.ts` |
+| whose darts are in the board; what a pull hands over | `src/handover.ts` |
 | game rules as a replayable event log (undo, corrections) | `src/game.ts` |
 | UI | `src/main.ts`, `src/ui/*` |
 

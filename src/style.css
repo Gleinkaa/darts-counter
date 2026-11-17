@@ -95,6 +95,9 @@ button { font: inherit; color: inherit; }
 .slot.total.bust { color: var(--bad); }
 .status { min-height: 22px; color: var(--muted); font-size: 15px; display: flex; justify-content: space-between; gap: 8px; }
 .status .hint { color: var(--warn); font-weight: 600; }
+.check { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: var(--radius); background: #3a2a10; border: 1px solid #6b4c14; font-size: 16px; line-height: 1.4; }
+.check[hidden] { display: none; }
+.check b { color: var(--warn); }
 .controls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .controls .btn { padding: 0 6px; font-size: 16px; }
 .controls .btn.wide { grid-column: span 2; }

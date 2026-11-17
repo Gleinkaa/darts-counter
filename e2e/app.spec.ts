@@ -19,8 +19,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const fx: Fixture = JSON.parse(readFileSync(join(here, 'fixtures', 'darts.json'), 'utf8')) as Fixture;
 
 /** Start the camera, tap the four calibration points, and hand over to the play screen. */
-async function calibrate(page: Page): Promise<void> {
+async function calibrate(page: Page, players = 1): Promise<void> {
   await page.goto('/');
+  await page.locator(`[data-n="${players}"]`).click();
   await page.getByTestId('start').click();
   const cam = page.getByTestId('camera');
   await expect(cam).toBeVisible();
@@ -54,10 +55,10 @@ test.afterEach(async ({ page }, testInfo) => {
   }
 });
 
-test('calibrate, three darts score 115, darts pulled leaves 386', async ({ page }) => {
+test('calibrate, three darts score 115, pulling the darts hands over to player 2, Undo takes it back', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const t0 = Date.now();
-  await calibrate(page);
+  await calibrate(page, 2);
   console.log(`  calibrated in ${Date.now() - t0} ms`);
 
   await expect(page.getByTestId('dart-0')).toContainText('T20', { timeout: 30_000 });
@@ -68,9 +69,17 @@ test('calibrate, three darts score 115, darts pulled leaves 386', async ({ page 
 
   // 20 s into the clip the darts are pulled: the visit closes and 501 - 115 is left.
   await expect(page.getByTestId('score-0')).toHaveText('386', { timeout: 20_000 });
-  // ... and the pull itself must be detected: the finished visit is banked and a fresh one starts.
-  await expect(page.getByTestId('visit-total')).toHaveText('0', { timeout: 20_000 });
-  console.log(`  visit closed at ${Date.now() - t0} ms`);
+  // ... and the pull itself must be detected: the board goes to player 2 with a fresh visit.
+  await expect(page.getByTestId('player-1')).toHaveClass(/active/, { timeout: 20_000 });
+  await expect(page.getByTestId('visit-total')).toHaveText('0');
+  await expect(page.getByTestId('status')).toContainText('Player 2 to throw');
+  console.log(`  handed over at ${Date.now() - t0} ms`);
+
+  // Undo reverts the hand-over: player 1's visit is back, with its three darts.
+  await page.getByTestId('undo').click();
+  await expect(page.getByTestId('player-0')).toHaveClass(/active/);
+  await expect(page.getByTestId('visit-total')).toHaveText(String(fx.turnTotal));
+  await expect(page.getByTestId('score-0')).toHaveText('386');
 
   await page.screenshot({ path: test.info().outputPath('app-final.png'), fullPage: true });
 });

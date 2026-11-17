@@ -6,6 +6,7 @@ import { checkoutHint, CRICKET_TARGETS, Game, type GameConfig, type GameEvent, t
 import { apply, fitHomography, invert, mul, type Mat3 } from './homography.ts';
 import { poseFromHomography } from './camera.ts';
 import { refineCalibration } from './refine.ts';
+import { BoardCycle } from './handover.ts';
 import { ThrowTracker, type TrackerEvent } from './tracker.ts';
 import { boardSvg } from './ui/boardSvg.ts';
 import { drawBoardOverlay, drawDartMarker } from './ui/overlay.ts';
@@ -203,8 +204,7 @@ let rafId = 0;
 let placeDartFor: GameEvent | null = null; // dart awaiting a tap on the camera picture
 let observers: ResizeObserver[] = [];
 let manual = false; // scoring by tapping only, camera unused
-let autoAdvancedAt = -1; // game.events.length right after the board reported "darts pulled"
-let boardEmpty = true; // false from the first dart until the board is seen (or confirmed) empty again
+const cycle = new BoardCycle(); // whose darts are in the board; the pull-out hand-over
 let lastStatus = '';
 
 const app = $('#app');
@@ -297,7 +297,7 @@ function stopCamera() {
 
 function newGame() {
   void keepAwake();
-  autoAdvancedAt = -1;
+  cycle.newGame();
   winnerShown = false;
   const cfg: GameConfig = { kind: settings.kind, start: settings.start, doubleOut: settings.doubleOut, players: [...settings.players] };
   game = new Game(cfg);
@@ -458,7 +458,7 @@ function renderCalibrate() {
     ok.disabled = !H;
     // The confirmed frame becomes the empty-board reference, so darts still in the board (after a
     // rotation or a mid-game recalibration) must come out first; say so on the button itself.
-    const dartsIn = !!game && (!boardEmpty || game.state.visit.darts.length > 0);
+    const dartsIn = !!game && (!cycle.empty || game.state.visit.darts.length > 0);
     if (dartsIn && i >= 4) $('#calinfo').textContent = `⚠ Pull all darts out first: the board must be empty. ${snap}`;
     // Without a successful snap the user must explicitly accept the rough calibration.
     ok.textContent = dartsIn
@@ -540,12 +540,9 @@ function renderCalibrate() {
     storeCalibration(c, calPts);
     tracker = null;
     manual = false;
-    boardEmpty = true; // the user has just confirmed it
-    // "Darts are out" also ends a finished visit, as the board seeing them pulled would have.
-    if (game?.state.visitClosed && game.next()) {
-      autoAdvancedAt = game.events.length;
-      announceVisit();
-    }
+    // The user has just confirmed the board is empty. "Darts are out" also ends a finished visit,
+    // as the board seeing them pulled would have.
+    if (game && cycle.confirmEmpty(game)) announceVisit();
     renderPlay();
   });
 
@@ -579,6 +576,12 @@ function renderPlay() {
       <div class="players-board" id="players" data-testid="players"></div>
       <div class="visit" id="visit" data-testid="visit"></div>
       <div class="status"><span id="status" data-testid="status"></span><span class="hint" id="hint"></span></div>
+      <div class="check" id="check" role="alert" data-testid="board-check" hidden>
+        <div><b>Board check.</b> The board looks different (light, exposure or the camera moved), so the
+        camera has stopped scoring. Pull all darts out, then tap <b>Board is empty</b>.
+        If the phone moved, tap <b>Calibrate</b> instead.</div>
+        <button class="btn primary" id="checkok" data-testid="board-empty">Board is empty</button>
+      </div>
       <div class="controls">
         <button class="btn" id="undo" data-testid="undo">Undo</button>
         <button class="btn" id="add">＋ Dart</button>
@@ -601,7 +604,7 @@ function renderPlay() {
     placeDartFor = null;
     const st = game!.state;
     // The board already reported "pulled" and moved on: a second tap must not skip the next player.
-    if (!st.visit.darts.length && !st.visitClosed && game!.events.length === autoAdvancedAt) {
+    if (!cycle.canNext(game!)) {
       toast(`Already ${st.players[st.current].name}'s turn`);
       return;
     }
@@ -615,6 +618,13 @@ function renderPlay() {
   $('#menu').addEventListener('click', () => {
     if (game!.events.length && !confirm('Abandon this game?')) return;
     renderSetup();
+  });
+  $('#checkok').addEventListener('click', () => {
+    // Learn the empty board again from the next still picture.
+    tracker?.resetWhenStill();
+    if (cycle.confirmEmpty(game!)) announceVisit();
+    setStatus('Ready — throw!');
+    refresh();
   });
 
   if (withCam) startTracking();
@@ -672,30 +682,46 @@ function startTracking() {
 
 function onTrackerEvent(e: TrackerEvent) {
   const g = game!;
-  if (e.type === 'busy') setStatus('Hand in view…');
-  else if (e.type === 'removed') setStatus('Dart pulled out — not counted');
-  else if (e.type === 'nodart') {
-    boardEmpty = false; // maybe a dart the detector missed: warn before it becomes the empty board
-    setStatus('Change seen but no dart found — use ＋ Dart if one landed');
-  }
-  else if (e.type === 'empty') {
-    boardEmpty = true;
-    if (g.next()) {
-      autoAdvancedAt = g.events.length;
+  const out = cycle.apply(g, e);
+  switch (out.type) {
+    case 'busy':
+      setStatus('Hand in view…');
+      break;
+    case 'blocked':
+      setStatus('View blocked — waiting for a clear view of the board');
+      break;
+    case 'unblocked':
+    case 'empty':
+      setStatus('Ready — throw!');
+      break;
+    case 'check':
+      setStatus('Board check — pull all darts out, then tap “Board is empty”');
+      say('Board check');
+      break;
+    case 'removed':
+      setStatus('Dart pulled out — not counted');
+      break;
+    case 'nodart':
+      setStatus('Change seen but no dart found — use ＋ Dart if one landed');
+      break;
+    case 'handover': {
       announceVisit();
-      setStatus('Darts pulled — next player');
-    } else setStatus('Ready — throw!');
-  } else if (e.type === 'dart') {
-    const s = scoreAt(e.board.x, e.board.y);
-    boardEmpty = false;
-    if (!g.addDart(s, true, e.board)) {
-      setStatus('Visit complete — pull the darts');
-      return;
+      const st = g.state;
+      setStatus(st.winner === null ? `Darts pulled — ${st.players[st.current].name} to throw` : 'Darts pulled');
+      break;
     }
-    flashDart(scoreLabel(s));
-    say(s.ring === 'miss' ? 'miss' : spoken(s));
-    const st = g.state;
-    setStatus(st.visitClosed ? 'Visit complete — pull the darts' : `Dart ${st.visit.darts.length} — ${scoreLabel(s)}`);
+    case 'dart': {
+      if (!out.counted) {
+        setStatus('Visit complete — pull the darts');
+        return;
+      }
+      const label = scoreLabel(out.score);
+      flashDart(label);
+      say(out.score.ring === 'miss' ? 'miss' : spoken(out.score));
+      const st = g.state;
+      setStatus(st.visitClosed ? 'Visit complete — pull the darts' : `Dart ${st.visit.darts.length} — ${label}`);
+      break;
+    }
   }
   refresh();
 }
@@ -742,7 +768,9 @@ function refresh() {
   }
   if (st.winner !== null) showWinner(st);
   else winnerShown = false; // e.g. the sheet was dismissed, then Undo
-  if (game!.events.length < autoAdvancedAt) autoAdvancedAt = -1; // undone past the auto-advance
+  if (game!.events.length < cycle.autoAdvancedAt) cycle.autoAdvancedAt = -1; // undone past the auto-advance
+  const check = document.getElementById('check');
+  if (check) check.hidden = !cycle.checking;
 }
 
 function renderPlayers(st: GameState) {
@@ -810,7 +838,7 @@ function openPicker(event: number | null) {
     <div class="row"><button class="btn ghost" id="cancel">Cancel</button></div>`);
   const commit = (s: Score) => {
     if (event === null) {
-      if (g.addDart(s, false)) boardEmpty = false;
+      if (g.addDart(s, false)) cycle.empty = false;
       else toast('This visit is complete — tap “Darts pulled”');
     } else if (g.events[event]?.type === 'dart') {
       g.correct(event, s);
