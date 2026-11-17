@@ -40,7 +40,12 @@ export class BoardCycle {
         const visit = visitNo(game);
         this.empty = false;
         const counted = game.addDart(score, true, e.board);
-        if (counted) this.owner = visit;
+        if (counted) {
+          this.owner = visit;
+          // The next player has thrown: a manual Next tap is allowed again (the auto-advance guard
+          // only blocks a Next immediately after the hand-over, before anything else happened).
+          this.autoAdvancedAt = -1;
+        }
         return { type: 'dart', score, counted };
       }
       case 'nodart':
@@ -88,6 +93,8 @@ export class BoardCycle {
   /** A new game in the same room: the darts in the board (if any) belong to nobody in it. */
   newGame(): void {
     this.owner = null;
+    this.empty = true;
+    this.checking = false;
     this.autoAdvancedAt = -1;
   }
 }

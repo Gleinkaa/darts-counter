@@ -152,6 +152,26 @@ describe('pull-out hand-over', () => {
     expect(b.game.state.visit.darts.length).toBe(2);
   });
 
+  it('throw-then-undo back to the auto-advance point re-enables a manual Next', () => {
+    const { game, cycle, feed } = setup();
+    feed(cam(T20), cam(S5), cam(BULL), PULLED); // auto hand-over: the guard is armed
+    expect(cycle.canNext(game)).toBe(false);
+    feed(cam(S1)); // B throws …
+    game.undo(); // … then undoes it, back to the same event length as the hand-over
+    expect(game.state.visit.darts.length).toBe(0);
+    expect(cycle.canNext(game)).toBe(true); // a manual "Darts pulled" is allowed again
+  });
+
+  it('a new game clears a stale board check and empty flag', () => {
+    const { cycle, feed } = setup();
+    feed(cam(T20), { type: 'check', changed: 0.5 });
+    expect(cycle.checking).toBe(true);
+    expect(cycle.empty).toBe(false);
+    cycle.newGame();
+    expect(cycle.checking).toBe(false);
+    expect(cycle.empty).toBe(true);
+  });
+
   it('the pull after a checkout does not start a new leg', () => {
     const { game, feed } = setup({ start: 40 });
     feed(cam(polar(166, 0))); // D20

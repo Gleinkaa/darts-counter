@@ -609,7 +609,16 @@ function renderPlay() {
       return;
     }
     game!.next(true);
-    if (tracker && cam) tracker.resync(grab(cam)); // never replaces the empty-board reference
+    if (tracker && cam) {
+      if (cycle.checking) {
+        // A board check was open; the user ended the visit by hand. Leave the check and re-learn the
+        // empty board from the next still frame (the old reference is what triggered the check).
+        cycle.checking = false;
+        tracker.resetWhenStill();
+      } else {
+        tracker.resync(grab(cam)); // never replaces the empty-board reference
+      }
+    }
     announceVisit();
     refresh();
   });
